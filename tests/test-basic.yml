@@ -1,0 +1,44 @@
+name: Test basic invocation with mock API
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Start mock Endtest API server
+        run: |
+          python3 -c "
+          import http.server, threading
+
+          class Handler(http.server.BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'text/plain')
+                  self.end_headers()
+                  self.wfile.write(b'mock-hash-12345')
+              def log_message(self, format, *args):
+                  pass
+
+          server = http.server.HTTPServer(('127.0.0.1', 18080), Handler)
+          t = threading.Thread(target=server.serve_forever)
+          t.daemon = True
+          t.start()
+          import time; time.sleep(3600)
+          " &
+          sleep 1
+          echo "Mock server started"
+
+      - id: action
+        uses: .
+        with:
+          app_id: "test-app-id"
+          app_code: "test-app-code"
+          api_request: "http://127.0.0.1:18080/"
+          number_of_loops: "0"
+
+      - name: Assert action completed without error
+        run: |
+          echo "Action completed successfully with number_of_loops=0"
+          echo "PASS"

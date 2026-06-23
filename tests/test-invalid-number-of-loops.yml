@@ -1,0 +1,51 @@
+name: Test invalid number_of_loops input
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run action with non-integer number_of_loops and capture exit code
+        id: action
+        uses: .
+        with:
+          app_id: "fake-app-id"
+          app_code: "fake-app-code"
+          api_request: "https://example.com/fake-api"
+          number_of_loops: "not-a-number"
+        continue-on-error: true
+
+      - name: Assert action failed due to invalid number_of_loops
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: expected action to fail when number_of_loops is not a positive integer, but got outcome=$OUTCOME"
+            exit 1
+          fi
+          echo "PASS: action correctly failed when number_of_loops was invalid"
+
+      - name: Run action with zero number_of_loops and capture exit code
+        id: action_zero
+        uses: .
+        with:
+          app_id: "fake-app-id"
+          app_code: "fake-app-code"
+          api_request: "https://example.com/fake-api"
+          number_of_loops: "0"
+        continue-on-error: true
+
+      - name: Assert action failed due to zero number_of_loops
+        env:
+          OUTCOME: ${{ steps.action_zero.outcome }}
+        run: |
+          echo "outcome: $OUTCOME"
+          if [ "$OUTCOME" != "failure" ]; then
+            echo "FAIL: expected action to fail when number_of_loops is 0, but got outcome=$OUTCOME"
+            exit 1
+          fi
+          echo "PASS: action correctly failed when number_of_loops was 0"

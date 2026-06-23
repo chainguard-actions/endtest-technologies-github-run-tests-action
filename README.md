@@ -8,6 +8,7 @@ Hardened by [Chainguard](https://www.chainguard.dev) from the upstream action at
 
 | Version | Tag | Upstream commit |
 |---------|-----|-----------------|
+| v1.10 | [`v1.10`](https://github.com/chainguard-actions/endtest-technologies-github-run-tests-action/tree/v1.10) | [`b7b8f9e`](https://github.com/endtest-technologies/github-run-tests-action/commit/b7b8f9e68ca2a17cce85ad96599ac168c1164f55) |
 | v1.7 | [`v1.7`](https://github.com/chainguard-actions/endtest-technologies-github-run-tests-action/tree/v1.7) | [`caade02`](https://github.com/endtest-technologies/github-run-tests-action/commit/caade02ae1a7099a6245048e25759e8ae4918830) |
 
 ## Privacy

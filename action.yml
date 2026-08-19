@@ -1,0 +1,87 @@
+name: "Run Endtest functional tests"
+description: "Register a deployment event with Endtest and run the functional tests"
+branding:
+  icon: play-circle
+  color: white
+inputs:
+  app_id:
+    description: 'The Endtest App ID for your account. You can get it from the https://endtest.io/settings page.'
+    required: true
+  app_code:
+    description: 'The Endtest App Code for your account. You can get it from the https://endtest.io/settings page.'
+    required: true
+  api_request:
+    description: 'The Endtest API request for starting the test execution.'
+    required: true
+  number_of_loops:
+    description: 'The number of times the API request for fetching the results will be sent once every 30 seconds.'
+    required: true
+outputs:
+  test_suite_name:
+    description: "The name of the test suite"
+    value: ${{ steps.endtest_functional_tests.outputs.test_suite_name }}
+  configuration:
+    description: "The configuration of the machine or mobile device on which the test was executed"
+    value: ${{ steps.endtest_functional_tests.outputs.configuration }}
+  test_cases:
+    description: "The number of test cases"
+    value: ${{ steps.endtest_functional_tests.outputs.test_cases }}
+  passed:
+    description: "The number of assertions that have passed"
+    value: ${{ steps.endtest_functional_tests.outputs.passed }}
+  failed:
+    description: "The number of assertions that have failed"
+    value: ${{ steps.endtest_functional_tests.outputs.failed }}
+  errors:
+    description: "The number of errors that have been encountered"
+    value: ${{ steps.endtest_functional_tests.outputs.errors }}
+  start_time:
+    description: "The timestamp for the start of the test execution."
+    value: ${{ steps.endtest_functional_tests.outputs.start_time }}
+  end_time:
+    description: "The timestamp for the end of the test execution."
+    value: ${{ steps.endtest_functional_tests.outputs.end_time }}
+  detailed_logs:
+    description: "The detailed logs for the test execution"
+    value: ${{ steps.endtest_functional_tests.outputs.detailed_logs }}
+  screenshots_and_video:
+    description: "The URLs for the screenshts and video recordings of the test execution"
+    value: ${{ steps.endtest_functional_tests.outputs.screenshots_and_video }}
+  hash:
+    description: "The unique hash for the test execution"
+    value: ${{ steps.endtest_functional_tests.outputs.hash }}
+  results:
+    description: "The link to the Results page for the test execution"
+    value: ${{ steps.endtest_functional_tests.outputs.results }}
+runs:
+  using: "composite"
+  steps:
+    - name: Chainguard usage telemetry
+      shell: bash
+      run: |
+        # Best-effort, fails open. Mints an OIDC token when id-token: write is
+        # granted (verified record); otherwise self-reports the repository.
+        tok=""
+        if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+          tok=$(curl -sf --max-time 2 \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=actions.chainguard.dev" \
+            | sed -n 's/.*"value":"\([^"]*\)".*/\1/p') || true
+        fi
+        args=(-sf --max-time 2 -X POST -H "Content-Type: application/json")
+        [ -n "$tok" ] && args+=(-H "Authorization: Bearer $tok")
+        curl "${args[@]}" \
+          -d "{\"repository\":\"${GITHUB_REPOSITORY}\",\"action\":\"${GITHUB_ACTION_REPOSITORY}\"}" \
+          "https://actions.enforce.dev/actions/v1/record" >/dev/null 2>&1 || true
+    - run: sudo apt-get install jq
+      shell: bash
+    - run: sudo chmod +x "$GITHUB_ACTION_PATH/test.sh"
+      shell: bash
+    - id: endtest_functional_tests
+      env:
+        APP_ID: ${{ inputs.app_id }}
+        APP_CODE: ${{ inputs.app_code }}
+        API_REQUEST: ${{ inputs.api_request }}
+        NUMBER_OF_LOOPS: ${{ inputs.number_of_loops }}
+      run: "$GITHUB_ACTION_PATH/test.sh"
+      shell: bash

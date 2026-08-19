@@ -1,0 +1,36 @@
+name: Test script is made executable
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Pre-install jq
+        run: |
+          apt-get install -y jq 2>/dev/null || sudo apt-get install -y jq 2>/dev/null || true
+          echo "jq: $(command -v jq || echo 'not found')"
+      - name: Verify test.sh exists in action directory
+        run: |
+          if [ ! -f "${GITHUB_WORKSPACE}/test.sh" ]; then
+            echo "FAIL: test.sh not found at ${GITHUB_WORKSPACE}/test.sh"
+            exit 1
+          fi
+          echo "PASS: test.sh exists"
+          ls -la "${GITHUB_WORKSPACE}/test.sh"
+      - id: action
+        uses: .
+        continue-on-error: true
+        with:
+          app_id: "test-app-id"
+          app_code: "test-app-code"
+          api_request: "https://endtest.io/api.php?action=runTests&appId=test-app-id&appCode=test-app-code&testSuiteId=0"
+          number_of_loops: "1"
+      - name: Assert test.sh is executable after action runs
+        run: |
+          ls -la "${GITHUB_WORKSPACE}/test.sh"
+          if [ ! -x "${GITHUB_WORKSPACE}/test.sh" ]; then
+            echo "FAIL: test.sh is not executable after action ran"
+            exit 1
+          fi
+          echo "PASS: test.sh is executable"

@@ -1,0 +1,128 @@
+name: Test basic usage - successful test run
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Pre-install jq so action apt-get step is a no-op
+        run: |
+          which jq && echo "jq already installed" || sudo apt-get install -y jq
+
+      - name: Set up mock curl and sleep
+        run: |
+          mkdir -p /tmp/mock-bin
+          echo "0" > /tmp/curl_call_count
+          cp "$GITHUB_WORKSPACE/tests/fixtures/mock-curl-basic.sh" /tmp/mock-bin/curl
+          cp "$GITHUB_WORKSPACE/tests/fixtures/mock-sleep.sh" /tmp/mock-bin/sleep
+          chmod +x /tmp/mock-bin/curl /tmp/mock-bin/sleep
+          echo "/tmp/mock-bin" >> "$GITHUB_PATH"
+
+      - name: Verify mock is on PATH
+        run: |
+          echo "PATH: $PATH"
+          which curl
+          echo "curl is: $(which curl)"
+
+      - id: action
+        uses: .
+        with:
+          app_id: "fake-app-id"
+          app_code: "fake-app-code"
+          api_request: "https://endtest.io/api.php?action=runTests&appId=fake-app-id&appCode=fake-app-code&testSuiteId=12345"
+          number_of_loops: "3"
+
+      - name: Assert test_suite_name output
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_suite_name }}
+        run: |
+          echo "actual test_suite_name: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: test_suite_name output is empty"
+            exit 1
+          fi
+          echo "PASS: test_suite_name is set to: $ACTUAL"
+
+      - name: Assert passed output
+        env:
+          ACTUAL: ${{ steps.action.outputs.passed }}
+        run: |
+          echo "actual passed: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: passed output is empty"
+            exit 1
+          fi
+          echo "PASS: passed is set to: $ACTUAL"
+
+      - name: Assert failed output
+        env:
+          ACTUAL: ${{ steps.action.outputs.failed }}
+        run: |
+          echo "actual failed: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: failed output is empty"
+            exit 1
+          fi
+          echo "PASS: failed is set to: $ACTUAL"
+
+      - name: Assert errors output
+        env:
+          ACTUAL: ${{ steps.action.outputs.errors }}
+        run: |
+          echo "actual errors: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: errors output is empty"
+            exit 1
+          fi
+          echo "PASS: errors is set to: $ACTUAL"
+
+      - name: Assert hash output
+        env:
+          ACTUAL: ${{ steps.action.outputs.hash }}
+        run: |
+          echo "actual hash: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: hash output is empty"
+            exit 1
+          fi
+          echo "PASS: hash is set to: $ACTUAL"
+
+      - name: Assert results output
+        env:
+          ACTUAL: ${{ steps.action.outputs.results }}
+        run: |
+          echo "actual results: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: results output is empty"
+            exit 1
+          fi
+          if echo "$ACTUAL" | grep -q "endtest.io/results"; then
+            echo "PASS: results URL contains expected domain"
+          else
+            echo "FAIL: results URL does not contain 'endtest.io/results', got: $ACTUAL"
+            exit 1
+          fi
+
+      - name: Assert configuration output
+        env:
+          ACTUAL: ${{ steps.action.outputs.configuration }}
+        run: |
+          echo "actual configuration: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: configuration output is empty"
+            exit 1
+          fi
+          echo "PASS: configuration is set to: $ACTUAL"
+
+      - name: Assert test_cases output
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_cases }}
+        run: |
+          echo "actual test_cases: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: test_cases output is empty"
+            exit 1
+          fi
+          echo "PASS: test_cases is set to: $ACTUAL"

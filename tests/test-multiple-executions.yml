@@ -1,0 +1,212 @@
+name: Test multiple executions
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake curl
+        run: |
+          mkdir -p /tmp/fake-bin
+
+          # Build the fake API result JSON for two executions
+          cat > /tmp/endtest-result.json <<'EOF'
+          [
+            {
+              "test_suite_name": "Suite Alpha",
+              "configuration": "Firefox on Linux",
+              "test_cases": "3",
+              "passed": "6",
+              "failed": "1",
+              "errors": "0",
+              "start_time": "2024-01-01 09:00:00",
+              "end_time": "2024-01-01 09:03:00",
+              "detailed_logs": [],
+              "screenshots_and_video": [],
+              "test_case_management": []
+            },
+            {
+              "test_suite_name": "Suite Beta",
+              "configuration": "Chrome on Mac",
+              "test_cases": "2",
+              "passed": "4",
+              "failed": "0",
+              "errors": "0",
+              "start_time": "2024-01-01 09:01:00",
+              "end_time": "2024-01-01 09:04:00",
+              "detailed_logs": [],
+              "screenshots_and_video": [],
+              "test_case_management": []
+            }
+          ]
+          EOF
+
+          cat > /tmp/fake-bin/curl <<'CURLEOF'
+          #!/bin/sh
+          # Fake curl supporting both stdout and -o FILE modes
+          out=""
+          prev=""
+          for arg in "$@"; do
+            case "$prev" in
+              -o|--output) out="$arg" ;;
+            esac
+            prev="$arg"
+          done
+
+          emit() {
+            if [ -n "$out" ]; then
+              cat "$1" > "$out"
+            else
+              cat "$1"
+            fi
+          }
+
+          case "$*" in
+            *trigger-multi*)
+              printf 'hash1,hash2' > /tmp/trigger-response.txt
+              emit /tmp/trigger-response.txt
+              exit 0
+              ;;
+            *getResults*)
+              emit /tmp/endtest-result.json
+              exit 0
+              ;;
+          esac
+
+          exec /usr/bin/curl "$@"
+          CURLEOF
+
+          chmod +x /tmp/fake-bin/curl
+
+      - id: action
+        uses: .
+        env:
+          PATH: /tmp/fake-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ENDTEST_POLL_INTERVAL_SECONDS: "0"
+        with:
+          app_id: "test-app-id"
+          app_code: "test-app-code"
+          api_request: "https://app.endtest.io/trigger-multi?appId=test-app-id&appCode=test-app-code"
+          number_of_loops: "5"
+          results_format: "json"
+          fail_build: "false"
+
+      - name: Assert execution_count is 2
+        env:
+          ACTUAL: ${{ steps.action.outputs.execution_count }}
+        run: |
+          echo "actual execution_count: $ACTUAL"
+          if [ "$ACTUAL" != "2" ]; then
+            echo "FAIL: expected '2' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert hash contains both hashes
+        env:
+          ACTUAL: ${{ steps.action.outputs.hash }}
+        run: |
+          echo "actual hash: $ACTUAL"
+          if [ "$ACTUAL" != "hash1,hash2" ]; then
+            echo "FAIL: expected 'hash1,hash2' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert hashes is JSON array with both hashes
+        env:
+          ACTUAL: ${{ steps.action.outputs.hashes }}
+        run: |
+          echo "actual hashes: $ACTUAL"
+          if [ "$ACTUAL" != '["hash1","hash2"]' ]; then
+            echo "FAIL: expected '[\"hash1\",\"hash2\"]' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert test_suite_name is JSON array
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_suite_name }}
+        run: |
+          echo "actual test_suite_name: $ACTUAL"
+          # Should be a JSON array of names
+          if ! echo "$ACTUAL" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "FAIL: expected a JSON array but got '$ACTUAL'"
+            exit 1
+          fi
+          COUNT=$(echo "$ACTUAL" | jq 'length')
+          if [ "$COUNT" != "2" ]; then
+            echo "FAIL: expected 2 names but got $COUNT"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert totals are summed correctly
+        env:
+          PASSED: ${{ steps.action.outputs.passed }}
+          FAILED: ${{ steps.action.outputs.failed }}
+          TEST_CASES: ${{ steps.action.outputs.test_cases }}
+        run: |
+          echo "passed: $PASSED, failed: $FAILED, test_cases: $TEST_CASES"
+          # passed = 6 + 4 = 10
+          if [ "$PASSED" != "10" ]; then
+            echo "FAIL: expected passed=10 but got '$PASSED'"
+            exit 1
+          fi
+          # failed = 1 + 0 = 1
+          if [ "$FAILED" != "1" ]; then
+            echo "FAIL: expected failed=1 but got '$FAILED'"
+            exit 1
+          fi
+          # test_cases = 3 + 2 = 5
+          if [ "$TEST_CASES" != "5" ]; then
+            echo "FAIL: expected test_cases=5 but got '$TEST_CASES'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert result_urls is JSON array with two URLs
+        env:
+          ACTUAL: ${{ steps.action.outputs.result_urls }}
+        run: |
+          echo "actual result_urls: $ACTUAL"
+          COUNT=$(echo "$ACTUAL" | jq 'length')
+          if [ "$COUNT" != "2" ]; then
+            echo "FAIL: expected 2 result URLs but got $COUNT"
+            exit 1
+          fi
+          FIRST=$(echo "$ACTUAL" | jq -r '.[0]')
+          SECOND=$(echo "$ACTUAL" | jq -r '.[1]')
+          if [ "$FIRST" != "https://app.endtest.io/results?hash=hash1" ]; then
+            echo "FAIL: expected first URL with hash1 but got '$FIRST'"
+            exit 1
+          fi
+          if [ "$SECOND" != "https://app.endtest.io/results?hash=hash2" ]; then
+            echo "FAIL: expected second URL with hash2 but got '$SECOND'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert start_time is earliest
+        env:
+          ACTUAL: ${{ steps.action.outputs.start_time }}
+        run: |
+          echo "actual start_time: $ACTUAL"
+          if [ "$ACTUAL" != "2024-01-01 09:00:00" ]; then
+            echo "FAIL: expected earliest start_time '2024-01-01 09:00:00' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert end_time is latest
+        env:
+          ACTUAL: ${{ steps.action.outputs.end_time }}
+        run: |
+          echo "actual end_time: $ACTUAL"
+          if [ "$ACTUAL" != "2024-01-01 09:04:00" ]; then
+            echo "FAIL: expected latest end_time '2024-01-01 09:04:00' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"

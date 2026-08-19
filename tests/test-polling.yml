@@ -1,0 +1,151 @@
+name: Test polling behavior and fail_build=false
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake curl with polling simulation
+        run: |
+          mkdir -p /tmp/fake-bin
+
+          # Counter file to track poll attempts
+          echo "0" > /tmp/poll-count
+
+          # Final result with failures (but fail_build=false so action should succeed)
+          cat > /tmp/endtest-result.json <<'EOF'
+          {
+            "test_suite_name": "Polling Suite",
+            "configuration": "Edge on Windows",
+            "test_cases": "2",
+            "passed": "1",
+            "failed": "2",
+            "errors": "0",
+            "start_time": "2024-03-01 08:00:00",
+            "end_time": "2024-03-01 08:02:00",
+            "detailed_logs": [],
+            "screenshots_and_video": [],
+            "test_case_management": []
+          }
+          EOF
+
+          cat > /tmp/fake-bin/curl <<'CURLEOF'
+          #!/bin/sh
+          out=""
+          prev=""
+          for arg in "$@"; do
+            case "$prev" in
+              -o|--output) out="$arg" ;;
+            esac
+            prev="$arg"
+          done
+
+          emit_text() {
+            TEXT="$1"
+            if [ -n "$out" ]; then
+              printf '%s' "$TEXT" > "$out"
+            else
+              printf '%s' "$TEXT"
+            fi
+          }
+
+          emit_file() {
+            if [ -n "$out" ]; then
+              cat "$1" > "$out"
+            else
+              cat "$1"
+            fi
+          }
+
+          case "$*" in
+            *trigger-poll*)
+              emit_text 'pollhash'
+              exit 0
+              ;;
+            *getResults*)
+              # First two polls return "still running", third returns results
+              COUNT=$(cat /tmp/poll-count)
+              COUNT=$((COUNT + 1))
+              echo "$COUNT" > /tmp/poll-count
+              if [ "$COUNT" -le 2 ]; then
+                emit_text 'Test is still running.'
+              else
+                emit_file /tmp/endtest-result.json
+              fi
+              exit 0
+              ;;
+          esac
+
+          exec /usr/bin/curl "$@"
+          CURLEOF
+
+          chmod +x /tmp/fake-bin/curl
+
+      - id: action
+        uses: .
+        env:
+          PATH: /tmp/fake-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ENDTEST_POLL_INTERVAL_SECONDS: "0"
+        with:
+          app_id: "test-app-id"
+          app_code: "test-app-code"
+          api_request: "https://app.endtest.io/trigger-poll?appId=test-app-id&appCode=test-app-code"
+          number_of_loops: "10"
+          results_format: "json"
+          fail_build: "false"
+
+      - name: Assert action succeeded despite failures (fail_build=false)
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+        run: |
+          echo "action outcome: $OUTCOME"
+          if [ "$OUTCOME" != "success" ]; then
+            echo "FAIL: expected action to succeed when fail_build=false even with test failures, but outcome was '$OUTCOME'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert test_suite_name after polling
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_suite_name }}
+        run: |
+          echo "actual test_suite_name: $ACTUAL"
+          if [ "$ACTUAL" != "Polling Suite" ]; then
+            echo "FAIL: expected 'Polling Suite' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert failed count is reported correctly
+        env:
+          ACTUAL: ${{ steps.action.outputs.failed }}
+        run: |
+          echo "actual failed: $ACTUAL"
+          if [ "$ACTUAL" != "2" ]; then
+            echo "FAIL: expected '2' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert hash
+        env:
+          ACTUAL: ${{ steps.action.outputs.hash }}
+        run: |
+          echo "actual hash: $ACTUAL"
+          if [ "$ACTUAL" != "pollhash" ]; then
+            echo "FAIL: expected 'pollhash' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert polling happened (count >= 3)
+        run: |
+          COUNT=$(cat /tmp/poll-count)
+          echo "poll count: $COUNT"
+          if [ "$COUNT" -lt 3 ]; then
+            echo "FAIL: expected at least 3 poll attempts but got $COUNT"
+            exit 1
+          fi
+          echo "PASS: polling worked correctly, $COUNT poll(s) made"

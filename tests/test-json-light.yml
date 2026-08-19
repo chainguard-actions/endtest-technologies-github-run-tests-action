@@ -1,0 +1,148 @@
+name: Test json-light results format
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake curl
+        run: |
+          mkdir -p /tmp/fake-bin
+
+          # json-light result has no detailed_logs or screenshots_and_video
+          cat > /tmp/endtest-result.json <<'EOF'
+          {
+            "test_suite_name": "Light Suite",
+            "configuration": "Safari on iOS",
+            "test_cases": "4",
+            "passed": "8",
+            "failed": "0",
+            "errors": "0",
+            "start_time": "2024-02-01 12:00:00",
+            "end_time": "2024-02-01 12:04:00",
+            "test_case_management": []
+          }
+          EOF
+
+          cat > /tmp/fake-bin/curl <<'CURLEOF'
+          #!/bin/sh
+          out=""
+          prev=""
+          for arg in "$@"; do
+            case "$prev" in
+              -o|--output) out="$arg" ;;
+            esac
+            prev="$arg"
+          done
+
+          emit() {
+            if [ -n "$out" ]; then
+              cat "$1" > "$out"
+            else
+              cat "$1"
+            fi
+          }
+
+          case "$*" in
+            *trigger-light*)
+              printf 'lighthash' > /tmp/trigger-response.txt
+              emit /tmp/trigger-response.txt
+              exit 0
+              ;;
+            *getResults*)
+              emit /tmp/endtest-result.json
+              exit 0
+              ;;
+          esac
+
+          exec /usr/bin/curl "$@"
+          CURLEOF
+
+          chmod +x /tmp/fake-bin/curl
+
+      - id: action
+        uses: .
+        env:
+          PATH: /tmp/fake-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ENDTEST_POLL_INTERVAL_SECONDS: "0"
+        with:
+          app_id: "test-app-id"
+          app_code: "test-app-code"
+          api_request: "https://app.endtest.io/trigger-light?appId=test-app-id&appCode=test-app-code"
+          number_of_loops: "5"
+          results_format: "json-light"
+          fail_build: "false"
+
+      - name: Assert test_suite_name
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_suite_name }}
+        run: |
+          echo "actual test_suite_name: $ACTUAL"
+          if [ "$ACTUAL" != "Light Suite" ]; then
+            echo "FAIL: expected 'Light Suite' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert detailed_logs is empty array (json-light has no logs)
+        env:
+          ACTUAL: ${{ steps.action.outputs.detailed_logs }}
+        run: |
+          echo "actual detailed_logs: $ACTUAL"
+          # In json-light mode, detailed_logs field is absent, so the flattened array is []
+          if [ "$ACTUAL" != "[]" ]; then
+            echo "FAIL: expected '[]' for detailed_logs in json-light mode but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert screenshots_and_video is empty array (json-light has no media)
+        env:
+          ACTUAL: ${{ steps.action.outputs.screenshots_and_video }}
+        run: |
+          echo "actual screenshots_and_video: $ACTUAL"
+          if [ "$ACTUAL" != "[]" ]; then
+            echo "FAIL: expected '[]' for screenshots_and_video in json-light mode but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert hash
+        env:
+          ACTUAL: ${{ steps.action.outputs.hash }}
+        run: |
+          echo "actual hash: $ACTUAL"
+          if [ "$ACTUAL" != "lighthash" ]; then
+            echo "FAIL: expected 'lighthash' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert passed count
+        env:
+          ACTUAL: ${{ steps.action.outputs.passed }}
+        run: |
+          echo "actual passed: $ACTUAL"
+          if [ "$ACTUAL" != "8" ]; then
+            echo "FAIL: expected '8' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert test_executions is a JSON array
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_executions }}
+        run: |
+          echo "actual test_executions: $ACTUAL"
+          if ! echo "$ACTUAL" | jq -e 'type == "array"' > /dev/null 2>&1; then
+            echo "FAIL: expected test_executions to be a JSON array but got '$ACTUAL'"
+            exit 1
+          fi
+          COUNT=$(echo "$ACTUAL" | jq 'length')
+          if [ "$COUNT" != "1" ]; then
+            echo "FAIL: expected 1 execution in test_executions but got $COUNT"
+            exit 1
+          fi
+          echo "PASS"

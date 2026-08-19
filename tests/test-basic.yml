@@ -1,0 +1,192 @@
+name: Test basic single execution
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install fake curl
+        run: |
+          mkdir -p /tmp/fake-bin
+
+          # Build the fake API result JSON
+          cat > /tmp/endtest-result.json <<'EOF'
+          {
+            "test_suite_name": "My Test Suite",
+            "configuration": "Chrome on Windows",
+            "test_cases": "5",
+            "passed": "10",
+            "failed": "0",
+            "errors": "0",
+            "start_time": "2024-01-01 10:00:00",
+            "end_time": "2024-01-01 10:05:00",
+            "detailed_logs": [{"step": "open", "result": "pass"}],
+            "screenshots_and_video": [{"url": "https://example.com/screenshot.png"}],
+            "test_case_management": []
+          }
+          EOF
+
+          cat > /tmp/fake-bin/curl <<'CURLEOF'
+          #!/bin/sh
+          # Fake curl that handles both trigger and polling requests
+          # Supports both "curl URL | sh" (stdout) and "curl -o FILE URL" (file)
+          out=""
+          prev=""
+          for arg in "$@"; do
+            case "$prev" in
+              -o|--output) out="$arg" ;;
+            esac
+            prev="$arg"
+          done
+
+          emit() {
+            if [ -n "$out" ]; then
+              cat "$1" > "$out"
+            else
+              cat "$1"
+            fi
+          }
+
+          # Check if this is the trigger request (api_request URL)
+          case "$*" in
+            *trigger-test*)
+              printf 'abc123' > /tmp/trigger-response.txt
+              emit /tmp/trigger-response.txt
+              exit 0
+              ;;
+            *getResults*)
+              emit /tmp/endtest-result.json
+              exit 0
+              ;;
+          esac
+
+          # Fall through to real curl for anything else
+          exec /usr/bin/curl "$@"
+          CURLEOF
+
+          chmod +x /tmp/fake-bin/curl
+
+      - id: action
+        uses: .
+        env:
+          PATH: /tmp/fake-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ENDTEST_POLL_INTERVAL_SECONDS: "0"
+        with:
+          app_id: "test-app-id"
+          app_code: "test-app-code"
+          api_request: "https://app.endtest.io/trigger-test?appId=test-app-id&appCode=test-app-code"
+          number_of_loops: "5"
+          results_format: "json"
+          fail_build: "false"
+
+      - name: Assert test_suite_name
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_suite_name }}
+        run: |
+          echo "actual test_suite_name: $ACTUAL"
+          if [ "$ACTUAL" != "My Test Suite" ]; then
+            echo "FAIL: expected 'My Test Suite' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert configuration
+        env:
+          ACTUAL: ${{ steps.action.outputs.configuration }}
+        run: |
+          echo "actual configuration: $ACTUAL"
+          if [ "$ACTUAL" != "Chrome on Windows" ]; then
+            echo "FAIL: expected 'Chrome on Windows' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert test_cases
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_cases }}
+        run: |
+          echo "actual test_cases: $ACTUAL"
+          if [ "$ACTUAL" != "5" ]; then
+            echo "FAIL: expected '5' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert passed
+        env:
+          ACTUAL: ${{ steps.action.outputs.passed }}
+        run: |
+          echo "actual passed: $ACTUAL"
+          if [ "$ACTUAL" != "10" ]; then
+            echo "FAIL: expected '10' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert failed
+        env:
+          ACTUAL: ${{ steps.action.outputs.failed }}
+        run: |
+          echo "actual failed: $ACTUAL"
+          if [ "$ACTUAL" != "0" ]; then
+            echo "FAIL: expected '0' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert errors
+        env:
+          ACTUAL: ${{ steps.action.outputs.errors }}
+        run: |
+          echo "actual errors: $ACTUAL"
+          if [ "$ACTUAL" != "0" ]; then
+            echo "FAIL: expected '0' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert hash
+        env:
+          ACTUAL: ${{ steps.action.outputs.hash }}
+        run: |
+          echo "actual hash: $ACTUAL"
+          if [ "$ACTUAL" != "abc123" ]; then
+            echo "FAIL: expected 'abc123' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert execution_count
+        env:
+          ACTUAL: ${{ steps.action.outputs.execution_count }}
+        run: |
+          echo "actual execution_count: $ACTUAL"
+          if [ "$ACTUAL" != "1" ]; then
+            echo "FAIL: expected '1' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert results URL
+        env:
+          ACTUAL: ${{ steps.action.outputs.results }}
+        run: |
+          echo "actual results: $ACTUAL"
+          if [ "$ACTUAL" != "https://app.endtest.io/results?hash=abc123" ]; then
+            echo "FAIL: expected results URL with hash abc123 but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert hashes JSON array
+        env:
+          ACTUAL: ${{ steps.action.outputs.hashes }}
+        run: |
+          echo "actual hashes: $ACTUAL"
+          if [ "$ACTUAL" != '["abc123"]' ]; then
+            echo "FAIL: expected '[\"abc123\"]' but got '$ACTUAL'"
+            exit 1
+          fi
+          echo "PASS"

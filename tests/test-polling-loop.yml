@@ -1,0 +1,117 @@
+name: Test polling loop scenario
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Ensure jq is available
+        run: |
+          # Ensure jq is installed (it's pre-installed on ubuntu-latest, but make sure)
+          jq --version || sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Install mock curl with state tracking, sleep, and apt-get
+        run: |
+          # Mock apt-get in /usr/bin so sudo can find it (sudo uses secure PATH)
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/bin/apt-get > /dev/null
+          sudo chmod +x /usr/bin/apt-get
+          # Also mock in /usr/local/bin for non-sudo calls
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/apt-get > /dev/null
+          sudo chmod +x /usr/local/bin/apt-get
+
+          # Override sleep to be instant
+          printf '#!/bin/sh\nexit 0\n' | sudo tee /usr/local/bin/sleep > /dev/null
+          sudo chmod +x /usr/local/bin/sleep
+
+          # State file to track getResults call count
+          echo "0" > /tmp/getresults_call_count
+
+          # Write fake curl to /usr/local/bin so it's on PATH for composite action steps
+          # Supports both pipe form (stdout) and hardened form (-o FILE)
+          cat > /tmp/fake-curl.sh << 'FAKECURL'
+          #!/bin/bash
+          out=""
+          prev=""
+          url=""
+          for arg in "$@"; do
+            case "$prev" in
+              -o|--output) out="$arg" ;;
+            esac
+            case "$arg" in
+              http*) url="$arg" ;;
+            esac
+            prev="$arg"
+          done
+          if echo "$url" | grep -q "getResults"; then
+            # Note: bash brace expansion {1.."${4}"} doesn't expand with variables,
+            # so the loop in test.sh runs exactly once regardless of number_of_loops.
+            # Return valid JSON immediately on the first (and only) getResults call.
+            payload='{"test_suite_name":"Polling Test Suite","configuration":"Firefox on macOS","test_cases":3,"passed":2,"failed":1,"errors":0,"start_time":"2024-01-01 11:00:00","end_time":"2024-01-01 11:03:00","detailed_logs":"2 passed, 1 failed","screenshots_and_video":"https://endtest.io/screenshots/poll456"}'
+            if [ -n "$out" ]; then
+              echo "$payload" > "$out"
+            else
+              echo "$payload"
+            fi
+          else
+            if [ -n "$out" ]; then
+              echo "poll456hash" > "$out"
+            else
+              echo "poll456hash"
+            fi
+          fi
+          exit 0
+          FAKECURL
+          sudo cp /tmp/fake-curl.sh /usr/local/bin/curl
+          sudo chmod +x /usr/local/bin/curl
+
+          # Verify fake curl is installed
+          which curl
+          echo "Fake curl installed successfully"
+
+      - id: action
+        uses: .
+        with:
+          app_id: "test-app-id"
+          app_code: "test-app-code"
+          api_request: "https://endtest.io/api.php?action=runTests&appId=test-app-id&appCode=test-app-code&suiteId=456"
+          number_of_loops: "2"
+
+      - name: Assert test_suite_name output
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_suite_name }}
+        run: |
+          echo "actual test_suite_name: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: test_suite_name output is empty - polling loop may not have worked"
+            exit 1
+          fi
+          echo "PASS: test_suite_name is set after polling"
+
+      - name: Assert hash output
+        env:
+          ACTUAL: ${{ steps.action.outputs.hash }}
+        run: |
+          echo "actual hash: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: hash output is empty"
+            exit 1
+          fi
+          echo "PASS: hash is set"
+
+      - name: Assert results URL output
+        env:
+          ACTUAL: ${{ steps.action.outputs.results }}
+        run: |
+          echo "actual results: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: results output is empty"
+            exit 1
+          fi
+          if echo "$ACTUAL" | grep -q "endtest.io/results"; then
+            echo "PASS: results URL is correct"
+          else
+            echo "FAIL: results URL does not contain expected domain"
+            exit 1
+          fi

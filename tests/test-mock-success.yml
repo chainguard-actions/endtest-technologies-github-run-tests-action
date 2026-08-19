@@ -1,0 +1,90 @@
+name: Test mock success scenario
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up mock curl and sleep
+        run: |
+          mkdir -p /tmp/mock-bin
+          printf '%s\n' '#!/bin/bash' \
+            'URL="${@: -1}"' \
+            'if echo "$URL" | grep -q "getResults"; then' \
+            '  echo '"'"'{"test_suite_name":"My Suite","configuration":"Chrome on Windows","test_cases":5,"passed":5,"failed":0,"errors":0,"detailed_logs":"none","screenshots_and_video":"http://example.com/video","start_time":"2024-01-01T00:00:00Z","end_time":"2024-01-01T00:01:00Z"}'"'"'' \
+            'else' \
+            '  echo "abc123hash"' \
+            'fi' > /tmp/mock-bin/curl
+          chmod +x /tmp/mock-bin/curl
+          printf '%s\n' '#!/bin/bash' 'exit 0' > /tmp/mock-bin/sleep
+          chmod +x /tmp/mock-bin/sleep
+          echo "/tmp/mock-bin" >> $GITHUB_PATH
+
+      - id: action
+        uses: .
+        with:
+          app_id: "fake-app-id"
+          app_code: "fake-app-code"
+          api_request: "https://endtest.io/api.php?action=runTests&appId=fake-app-id&appCode=fake-app-code&testSuiteId=123"
+          number_of_loops: "1"
+
+      - name: Assert test_suite_name output
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_suite_name }}
+        run: |
+          echo "actual test_suite_name: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: test_suite_name output is empty"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert hash output
+        env:
+          ACTUAL: ${{ steps.action.outputs.hash }}
+        run: |
+          echo "actual hash: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: hash output is empty"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert passed output
+        env:
+          ACTUAL: ${{ steps.action.outputs.passed }}
+        run: |
+          echo "actual passed: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: passed output is empty"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert results output contains endtest domain
+        env:
+          ACTUAL: ${{ steps.action.outputs.results }}
+        run: |
+          echo "actual results: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: results output is empty"
+            exit 1
+          fi
+          if ! echo "$ACTUAL" | grep -q "endtest.io/results"; then
+            echo "FAIL: results URL does not contain expected domain"
+            exit 1
+          fi
+          echo "PASS"
+
+      - name: Assert failed output
+        env:
+          ACTUAL: ${{ steps.action.outputs.failed }}
+        run: |
+          echo "actual failed: $ACTUAL"
+          if [ -z "$ACTUAL" ]; then
+            echo "FAIL: failed output is empty"
+            exit 1
+          fi
+          echo "PASS"

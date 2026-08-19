@@ -1,0 +1,47 @@
+name: Test still running scenario
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up mock curl and sleep (always still running)
+        run: |
+          mkdir -p /tmp/mock-bin
+          printf '%s\n' '#!/bin/bash' \
+            'URL="${@: -1}"' \
+            'if echo "$URL" | grep -q "getResults"; then' \
+            '  echo "Test is still running."' \
+            'else' \
+            '  echo "abc123hash"' \
+            'fi' > /tmp/mock-bin/curl
+          chmod +x /tmp/mock-bin/curl
+          printf '%s\n' '#!/bin/bash' 'exit 0' > /tmp/mock-bin/sleep
+          chmod +x /tmp/mock-bin/sleep
+          echo "/tmp/mock-bin" >> $GITHUB_PATH
+
+      - id: action
+        uses: .
+        with:
+          app_id: "fake-app-id"
+          app_code: "fake-app-code"
+          api_request: "https://endtest.io/api.php?action=runTests&appId=fake-app-id&appCode=fake-app-code&testSuiteId=123"
+          number_of_loops: "2"
+
+      - name: Assert action completed without error when test still running
+        run: |
+          echo "Action completed successfully even when test was still running for all loops"
+          echo "PASS"
+
+      - name: Assert no test_suite_name output when still running
+        env:
+          ACTUAL: ${{ steps.action.outputs.test_suite_name }}
+        run: |
+          echo "actual test_suite_name: '$ACTUAL'"
+          if [ -n "$ACTUAL" ]; then
+            echo "FAIL: expected empty test_suite_name when test is still running, got: $ACTUAL"
+            exit 1
+          fi
+          echo "PASS: test_suite_name is empty as expected"
